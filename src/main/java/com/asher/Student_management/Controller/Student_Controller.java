@@ -14,10 +14,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.PutMapping;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 import java.util.Optional;
-
-
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 @RestController 
 @RequestMapping("/students")
 public class Student_Controller
@@ -26,8 +30,32 @@ public class Student_Controller
     public Student_Controller(Student_Service studentService) {
         this.studentService = studentService;
     }
+    @GetMapping("/security-info")
+    public String getSecurityInfo() 
+    {
+        SecurityContext context = SecurityContextHolder.getContext();
+        Authentication authentication = context.getAuthentication();
+
+        return "Username: " + authentication.getName()
+                + "\nAuthorities: " + authentication.getAuthorities()
+                + "\nAuthenticated: " + authentication.isAuthenticated();
+    }
+    @GetMapping("/session-info")
+    public String getSessionInfo(HttpServletRequest request) {
+
+        HttpSession session = request.getSession(false);
+
+        if (session == null) {
+            return "No existing session";
+        }
+
+        return "Session ID: " + session.getId();
+    }
     @GetMapping 
-    public ResponseEntity<List<Student>> getAllStudents() {
+    public ResponseEntity<List<Student>> getAllStudents() 
+    {
+        
+        System.out.println("Just Under the Get Controller Method");
         List<Student> students = studentService.getAllStudents();
         return ResponseEntity.ok(students);
     }
