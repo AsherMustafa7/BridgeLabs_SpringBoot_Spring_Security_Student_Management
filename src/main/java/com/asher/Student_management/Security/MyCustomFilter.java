@@ -18,11 +18,7 @@ public class MyCustomFilter implements Filter {
     }
 
     @Override
-    public void doFilter(
-            ServletRequest request,
-            ServletResponse response,
-            FilterChain chain
-    ) throws IOException, ServletException {
+    public void doFilter(ServletRequest request,ServletResponse response,FilterChain chain) throws IOException, ServletException {
 
         System.out.println("First Filter - Before Request received");
 
