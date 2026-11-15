@@ -10,6 +10,10 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import com.asher.Student_management.Config.CustomAuthenticationEntryPoint;
+import com.asher.Student_management.Config.CustomAccessDeniedHandler;
+
+
 @Configuration
 @EnableWebSecurity(debug = true)
 public class SecurityConfig {
@@ -23,29 +27,71 @@ public class SecurityConfig {
     //     return http.build();
     // }
 
+
     @Bean
     @Order(1)
     public SecurityFilterChain apiSecurityFilterChain(
-            HttpSecurity http) throws Exception {
+            HttpSecurity http,
+            CustomAuthenticationEntryPoint authenticationEntryPoint,
+            CustomAccessDeniedHandler accessDeniedHandler,CustomBasicAuthenticationEntryPoint customBasicAuthenticationEntryPoint)
+            throws Exception {
 
-        http.csrf(csrf -> csrf.disable())
+        http
+            .csrf(csrf -> csrf.disable())
+
             .securityMatcher("/students/**")
+            .exceptionHandling(exception -> exception
+                
+                .authenticationEntryPoint(authenticationEntryPoint)
+                .accessDeniedHandler(accessDeniedHandler)
+            )
+
             .authorizeHttpRequests(auth -> auth
 
-                .requestMatchers(HttpMethod.GET, "/students/**") // the get request will all be allowed
+                .requestMatchers(HttpMethod.GET, "/students/**")
                 .permitAll()
 
-                .requestMatchers(HttpMethod.POST, "/students/**") // the post request will require it to be authenticated
+                .requestMatchers(HttpMethod.POST, "/students/**")
                 .authenticated()
 
+                .requestMatchers(HttpMethod.DELETE, "/students/**")
+                .hasRole("ADMIN")
+                // This we will see later in the next features. 
                 .anyRequest()
                 .authenticated()
-
             )
-            .httpBasic(Customizer.withDefaults());
+            .httpBasic(basic -> basic
+            .authenticationEntryPoint(customBasicAuthenticationEntryPoint)
+        );
 
         return http.build();
     }
+    // @Bean
+    // @Order(2)
+    // public SecurityFilterChain apiSecurityFilterChain(
+    //         HttpSecurity http) throws Exception {
+
+    //     http.csrf(csrf -> csrf.disable())
+    //         .securityMatcher("/students/**")
+    //         .authorizeHttpRequests(auth -> auth
+
+    //             .requestMatchers(HttpMethod.GET, "/students/**") // the get request will all be allowed
+    //             .permitAll()
+
+    //             .requestMatchers(HttpMethod.POST, "/students/**") // the post request will require it to be authenticated
+    //             .authenticated()
+    //             // ---------------------------
+    //             .requestMatchers(HttpMethod.DELETE, "/students/**")
+    //             .hasRole("ADMIN")
+    //             // ---------------------------
+    //             .anyRequest()
+    //             .authenticated()
+
+    //         )
+    //         .httpBasic(Customizer.withDefaults());
+
+    //     return http.build();
+    // }
     @Bean
     @Order(2)
     public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http)
@@ -58,5 +104,7 @@ public class SecurityConfig {
 
         return http.build();
     }
+
+
     }
 

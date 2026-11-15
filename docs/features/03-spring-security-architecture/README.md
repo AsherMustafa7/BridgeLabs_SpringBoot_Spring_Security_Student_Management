@@ -3283,3 +3283,530 @@ The complete distinction:
 ---
 
 **End of Batch 4**
+# Feature 03 — Spring Security Architecture, Filter Chain & Advanced Configuration
+
+> **Project:** Student Management System  
+> **Location:** `docs/features/03-spring-security-architecture/README.md`  
+> **Focus:** Servlet filters, Spring Security filter infrastructure, authentication and authorization, multiple `SecurityFilterChain` beans, HTTP Basic, and custom authentication entry points.
+
+## 1. Learning objectives
+
+This feature connects the Servlet API with Spring Security. It explains how Tomcat invokes Servlet filters, how Spring Security selects a security filter chain, how HTTP Basic authentication works, and how authorization failures become HTTP responses. It also documents the `/students/**` chain configured with `@Order(1)` and a custom HTTP Basic entry point.
+
+## 2. Overall architecture
+
+Spring Security is integrated into the same Servlet container as the application. Tomcat receives the HTTP request and invokes its Servlet filter chain. `DelegatingFilterProxy` delegates to Spring Security's `FilterChainProxy`, which selects the first matching `SecurityFilterChain`.
+
+```mermaid
+flowchart TD
+    A["Postman / Browser"] --> B["Tomcat Servlet Container"]
+    B --> C["Tomcat Servlet Filter Chain"]
+    C --> D["DelegatingFilterProxy"]
+    D --> E["FilterChainProxy"]
+    E --> F{"First matching SecurityFilterChain"}
+    F --> G["Spring Security filters"]
+    G --> H["Remaining Servlet filters"]
+    H --> I["DispatcherServlet"]
+    I --> J["Controller"]
+    J --> K["HTTP response"]
+```
+
+This is a conceptual overview. The exact position of application Servlet filters depends on their registration and ordering. Spring Security is part of the same Servlet filter chain; it is not a second web server or Servlet container.
+
+## 3. The Servlet filter foundation
+
+A Servlet filter can inspect or modify a request before it reaches a Servlet and can inspect or modify the response on its way back. A typical filter implements `jakarta.servlet.Filter` and overrides `doFilter(...)`:
+
+```java
+public void doFilter(
+        ServletRequest request,
+        ServletResponse response,
+        FilterChain chain)
+        throws IOException, ServletException {
+
+    System.out.println("Before request");
+    chain.doFilter(request, response);
+    System.out.println("After response");
+}
+```
+
+| Parameter | Meaning |
+|---|---|
+| `ServletRequest` | The incoming request exposed through the Servlet API. |
+| `ServletResponse` | The response being constructed for the client. |
+| `FilterChain` | Invokes the next filter or, eventually, the target Servlet. |
+
+`HttpServletRequest` extends `ServletRequest` and adds HTTP-specific operations such as reading headers, cookies, HTTP methods, and sessions. A filter and a controller normally work with the same underlying request as it travels through the application, although wrappers can be introduced. Calling `chain.doFilter(...)` continues the current request; it does not create a new one.
+
+### 3.1 Filter execution and unwinding
+
+```mermaid
+flowchart TD
+    A["Request enters Filter A"] --> B["Filter A: before"]
+    B --> C["Filter A calls chain.doFilter"]
+    C --> D["Filter B: before"]
+    D --> E["Filter B calls chain.doFilter"]
+    E --> F["Target Servlet / Controller"]
+    F --> G["Response returns to Filter B"]
+    G --> H["Filter B: after"]
+    H --> I["Response returns to Filter A"]
+    I --> J["Filter A: after"]
+```
+
+The `after` statements run while the call stack unwinds. For example:
+
+```text
+Filter A - Before
+Filter B - Before
+Controller executes
+Filter B - After
+Filter A - After
+```
+
+## 4. Spring Security's filter infrastructure
+
+### `DelegatingFilterProxy`
+
+`DelegatingFilterProxy` is registered with the Servlet container as a Servlet filter. It delegates processing to a Spring-managed bean. In the standard Spring Security setup, the target bean is conventionally named `springSecurityFilterChain`.
+
+### `FilterChainProxy`
+
+`FilterChainProxy` is Spring Security's central filter. It checks the configured `SecurityFilterChain` beans and selects the **first chain that matches** the incoming request.
+
+### `SecurityFilterChain`
+
+A `SecurityFilterChain` represents a set of security filters and the condition under which that set applies. It is an interface, but `http.build()` returns a concrete implementation of that interface. This is ordinary Java polymorphism:
+
+```java
+List<String> names = new ArrayList<>();
+```
+
+The reference type is the interface `List`; the actual object is an `ArrayList`. Similarly, the return type can be `SecurityFilterChain` while the actual object is an implementation created by Spring Security.
+
+### `HttpSecurity` is a builder, not a request
+
+Spring supplies `HttpSecurity` while creating the application context. It is a configuration builder used to define authentication, authorization, CSRF, exception handling, and other security behavior. It is not created for each GET or POST request.
+
+```java
+@Bean
+public SecurityFilterChain apiSecurityFilterChain(HttpSecurity http)
+        throws Exception {
+    http
+        .authorizeHttpRequests(auth ->
+            auth.anyRequest().authenticated()
+        )
+        .httpBasic(Customizer.withDefaults());
+
+    return http.build();
+}
+```
+
+| Object | Purpose | When it is relevant |
+|---|---|---|
+| `HttpSecurity` | Builds security configuration | Application startup |
+| `SecurityFilterChain` | Holds match rules and configured security filters | Request processing |
+| `FilterChainProxy` | Selects the applicable security chain | Request processing |
+| `HttpServletRequest` | Represents an incoming HTTP request | Each request |
+| `HttpServletResponse` | Represents the outgoing HTTP response | Each request |
+| `FilterChain` | Invokes the next Servlet filter | During request processing |
+
+### 4.1 Startup versus request processing
+
+```mermaid
+flowchart TD
+    subgraph START["Application startup"]
+        A["Spring creates application context"] --> B["Security configuration methods run"]
+        B --> C["HttpSecurity builder is configured"]
+        C --> D["http.build()"]
+        D --> E["SecurityFilterChain bean is registered"]
+        E --> F["Spring Security infrastructure uses configured chains"]
+    end
+    subgraph REQUEST["For each incoming HTTP request"]
+        G["Client sends request"] --> H["Tomcat receives request"]
+        H --> I["Servlet request and response are exposed"]
+        I --> J["Servlet filter chain runs"]
+        J --> K["DelegatingFilterProxy"]
+        K --> L["FilterChainProxy selects a matching chain"]
+        L --> M["Selected security filters execute"]
+        M --> N["DispatcherServlet and controller, if allowed"]
+    end
+```
+
+The startup phase prepares the security infrastructure. The request phase uses that already-configured infrastructure.
+
+## 5. How Tomcat filters and Spring Security filters relate
+
+Your custom Servlet filters and Spring Security filters execute inside the same Servlet container. Spring Security does not send the request back over the network or ask Tomcat to create another request.
+
+```mermaid
+flowchart TD
+    A["Tomcat receives request"] --> B["Servlet filter chain"]
+    B --> C["DelegatingFilterProxy"]
+    C --> D["FilterChainProxy"]
+    D --> E["Selected SecurityFilterChain"]
+    E --> F["Spring Security filters"]
+    F --> G["Return to outer Servlet filter chain"]
+    G --> H["Other registered Servlet filters"]
+    H --> I["DispatcherServlet"]
+    I --> J["Controller"]
+```
+
+This is illustrative, not a universal filter order. If a custom Servlet filter is registered before `DelegatingFilterProxy`, it can execute before Spring Security. If registered after the proxy, it executes after the proxy's downstream processing. The before/after log pattern comes from nested calls to `chain.doFilter(...)` and the subsequent stack unwinding.
+
+## 6. Authentication and authorization components
+
+Authentication answers **who are you?** Authorization answers **are you allowed to do this?**
+
+| Component | Responsibility |
+|---|---|
+| `BasicAuthenticationFilter` | Reads HTTP Basic credentials and initiates username/password authentication. |
+| `AuthenticationManager` | Coordinates an authentication attempt. |
+| `ProviderManager` | A common `AuthenticationManager` implementation; delegates to providers. |
+| `AuthenticationProvider` | Performs a particular type of authentication. |
+| `DaoAuthenticationProvider` | Common username/password provider using user details and a password encoder. |
+| `UserDetailsService` | Loads user details from the configured user source. |
+| `PasswordEncoder` | Verifies the submitted password against the stored encoded password. |
+| `SecurityContextHolder` | Holds the current execution's `SecurityContext`. |
+| `AuthorizationFilter` | Applies the configured authorization rules. |
+| `ExceptionTranslationFilter` | Translates relevant downstream security exceptions into HTTP responses. |
+| `AuthenticationEntryPoint` | Starts an authentication challenge, commonly returning 401. |
+| `AccessDeniedHandler` | Handles access denied for an authenticated user, commonly returning 403. |
+
+### 6.1 HTTP Basic authentication flow
+
+```mermaid
+flowchart TD
+    A["Client sends HTTP Basic credentials"] --> B["BasicAuthenticationFilter"]
+    B --> C["Creates unauthenticated Authentication request"]
+    C --> D["AuthenticationManager"]
+    D --> E["ProviderManager"]
+    E --> F["AuthenticationProvider"]
+    F --> G["UserDetailsService loads user"]
+    G --> H["PasswordEncoder checks password"]
+    H --> I{"Credentials valid?"}
+    I -->|Yes| J["Authenticated Authentication result"]
+    J --> K["SecurityContextHolder"]
+    I -->|No| L["AuthenticationException"]
+    L --> M["Basic authentication failure handling"]
+    M --> N["401 response / Basic challenge"]
+```
+
+`AuthenticationManager` and `AuthenticationProvider` are interfaces. `ProviderManager` and `DaoAuthenticationProvider` are common implementations. Spring Security configures this infrastructure; with the standard setup, you generally do not instantiate these objects manually.
+
+### 6.2 Authentication failures versus authorization failures
+
+- **Invalid Basic credentials:** `BasicAuthenticationFilter` initiates authentication and handles an authentication failure through its own failure-handling mechanism. The HTTP Basic entry point can send the 401 challenge.
+- **Unauthenticated request to a protected endpoint:** `AuthorizationFilter` denies access. `ExceptionTranslationFilter` can invoke the configured `AuthenticationEntryPoint`, normally producing 401.
+- **Authenticated user without the required authority:** `ExceptionTranslationFilter` can invoke the configured `AccessDeniedHandler`, normally producing 403.
+
+```mermaid
+flowchart TD
+    A["Request reaches authorization"] --> B{"Is access permitted?"}
+    B -->|Yes| C["Continue to application"]
+    B -->|No| D{"Is caller authenticated?"}
+    D -->|No| E["ExceptionTranslationFilter"]
+    E --> F["AuthenticationEntryPoint"]
+    F --> G["401 Unauthorized"]
+    D -->|Yes, insufficient authority| H["ExceptionTranslationFilter"]
+    H --> I["AccessDeniedHandler"]
+    I --> J["403 Forbidden"]
+```
+
+`ExceptionTranslationFilter` does not authenticate users or decide which roles are allowed. It translates relevant downstream security exceptions. Authentication filters such as `BasicAuthenticationFilter` have their own failure handling; do not assume every authentication exception is handled by `ExceptionTranslationFilter`.
+
+## 7. Multiple `SecurityFilterChain` beans: `@Order`, `securityMatcher`, and `requestMatchers`
+
+This feature introduces a dedicated security chain for the `/students/**` API.
+
+### 7.1 The configuration
+
+```java
+@Bean
+@Order(1)
+public SecurityFilterChain apiSecurityFilterChain(
+        HttpSecurity http,
+        CustomAuthenticationEntryPoint authenticationEntryPoint,
+        CustomAccessDeniedHandler accessDeniedHandler,
+        CustomBasicAuthenticationEntryPoint customBasicAuthenticationEntryPoint)
+        throws Exception {
+
+    http
+        .csrf(csrf -> csrf.disable())
+        .securityMatcher("/students/**")
+        .exceptionHandling(exception -> exception
+            .authenticationEntryPoint(authenticationEntryPoint)
+            .accessDeniedHandler(accessDeniedHandler)
+        )
+        .authorizeHttpRequests(auth -> auth
+            .requestMatchers(HttpMethod.GET, "/students/**")
+                .permitAll()
+            .requestMatchers(HttpMethod.POST, "/students/**")
+                .authenticated()
+            .requestMatchers(HttpMethod.DELETE, "/students/**")
+                .hasRole("ADMIN")
+            // This will be explored further in a later feature.
+            .anyRequest()
+                .authenticated()
+        )
+        .httpBasic(basic -> basic
+            .authenticationEntryPoint(customBasicAuthenticationEntryPoint)
+        );
+
+    return http.build();
+}
+```
+
+### 7.2 What each part does
+
+| Configuration | Meaning |
+|---|---|
+| `@Bean` | Registers the returned `SecurityFilterChain` as a Spring bean. |
+| `@Order(1)` | Gives this chain priority over chains with later order values. |
+| `securityMatcher("/students/**")` | Determines whether this entire chain applies to the request. |
+| GET matcher + `permitAll()` | Allows GET requests under `/students/**` without requiring authentication. |
+| POST matcher + `authenticated()` | Requires the caller to be authenticated. |
+| DELETE matcher + `hasRole("ADMIN")` | Requires the `ROLE_ADMIN` authority; `hasRole("ADMIN")` uses the `ROLE_` prefix convention. |
+| `.anyRequest().authenticated()` | Requires authentication for other requests matched by this chain. |
+| `.exceptionHandling(...)` | Configures the entry point and access-denied handler used by exception translation. |
+| `.httpBasic(...)` | Enables HTTP Basic and configures its authentication entry point. |
+| `http.build()` | Builds the configured chain and returns it through the `SecurityFilterChain` interface. |
+
+### 7.3 `securityMatcher` versus `requestMatchers`
+
+These methods operate at different levels:
+
+- `securityMatcher(...)` decides **whether this `SecurityFilterChain` is selected at all**.
+- `requestMatchers(...)` decides **which authorization rule applies after this chain has been selected**.
+
+For example, `GET /students/42` matches `securityMatcher("/students/**")`; inside the selected chain, the GET rule matches and `permitAll()` allows it through authorization. `/actuator/health` does not match this chain and must be handled by another matching chain if it also needs Spring Security protection.
+
+```mermaid
+flowchart TD
+    A["Incoming request"] --> B["FilterChainProxy"]
+    B --> C{"Does @Order(1) chain match /students/**?"}
+    C -->|No| D["Try the next SecurityFilterChain"]
+    C -->|Yes| E["Select Student API SecurityFilterChain"]
+    E --> F{"Evaluate requestMatchers"}
+    F -->|GET /students/**| G["permitAll"]
+    F -->|POST /students/**| H["authenticated"]
+    F -->|DELETE /students/**| I["hasRole ADMIN"]
+    F -->|Other request in this chain| J["authenticated"]
+```
+
+**Important multiple-chain note:** `FilterChainProxy` uses the first matching chain. If no configured chain matches a request, Spring Security does not select a chain for that request. If the application has routes outside `/students/**`, define an appropriate fallback chain when those routes also need security protection. `.anyRequest()` in this chain does not cover URLs outside `/students/**`; it applies only after this chain's `securityMatcher` has matched.
+
+### 7.4 Authorization examples
+
+| Request | Rule in this chain |
+|---|---|
+| `GET /students` | Public; no authentication required by this chain |
+| `GET /students/12` | Public; no authentication required by this chain |
+| `POST /students` | Authentication required |
+| `DELETE /students/12` | Caller must be authenticated and have `ROLE_ADMIN` |
+| `PUT /students/12` | Authentication required by `.anyRequest()` |
+| `GET /other-resource` | Does not match this chain; another chain would need to handle it |
+
+These are security rules only. A request that passes authorization can still fail later due to controller mapping, validation, business logic, or a missing resource.
+
+## 8. Custom authentication entry points
+
+The configuration uses two entry-point references for related but distinct situations:
+
+1. `CustomAuthenticationEntryPoint` is configured under `.exceptionHandling(...)`. It is used by Spring Security's exception-translation path when an unauthenticated caller tries to access a protected resource.
+2. `CustomBasicAuthenticationEntryPoint` is configured under `.httpBasic(...)`. It customizes the HTTP Basic authentication challenge/failure response.
+
+### 8.1 `CustomBasicAuthenticationEntryPoint`
+
+```java
+package com.asher.Student_management.Config;
+
+import org.springframework.security.web.authentication.www.BasicAuthenticationEntryPoint;
+import org.springframework.stereotype.Component;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.security.core.AuthenticationException;
+import java.io.IOException;
+
+@Component
+public class CustomBasicAuthenticationEntryPoint
+        extends BasicAuthenticationEntryPoint {
+
+    public CustomBasicAuthenticationEntryPoint() {
+        setRealmName("Student Management");
+    }
+
+    @Override
+    public void commence(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            AuthenticationException authEx) throws IOException {
+
+        response.addHeader(
+                "WWW-Authenticate",
+                "Basic realm=\"" + getRealmName() + "\""
+        );
+
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+
+        response.getWriter().println(
+                "HTTP Status 401 OHH my god this is the basic one haha- "
+                + authEx.getMessage()
+        );
+    }
+}
+```
+
+### 8.2 Explanation
+
+- **`extends BasicAuthenticationEntryPoint`:** Reuses Spring Security's HTTP Basic entry-point type and overrides `commence(...)` to customize the response.
+- **`setRealmName("Student Management")`:** Sets the realm name included in the HTTP Basic challenge.
+- **`commence(...)`:** Called by Spring Security when it needs to commence the HTTP Basic challenge. The request is the incoming request, the response is the outgoing response, and `authEx` describes the authentication failure.
+- **`WWW-Authenticate`:** The header tells the client that HTTP Basic authentication is requested for the `Student Management` realm.
+- **`SC_UNAUTHORIZED`:** Sets the HTTP response status to 401.
+- **Response body:** Writes the custom diagnostic message and exception message. The humorous text is fine for a learning exercise, but replace it with a concise, non-sensitive message before production. Avoid exposing internal exception details to clients.
+
+### 8.3 HTTP Basic challenge flow
+
+```mermaid
+sequenceDiagram
+    participant Client as Postman / Client
+    participant Basic as BasicAuthenticationFilter
+    participant Manager as AuthenticationManager
+    participant Provider as AuthenticationProvider
+    participant Entry as CustomBasicAuthenticationEntryPoint
+    Client->>Basic: Request with Basic credentials
+    Basic->>Manager: Authenticate username and password
+    Manager->>Provider: Delegate authentication
+    Provider-->>Manager: Authentication failure
+    Manager-->>Basic: AuthenticationException
+    Basic->>Entry: commence(request, response, exception)
+    Entry-->>Client: 401 + WWW-Authenticate Basic realm
+```
+
+This diagram shows the invalid-credentials path. On successful authentication, the authenticated result is stored in the security context and the request continues through the filter chain.
+
+## 9. Authentication is not the same as a session
+
+The project used this controller method to inspect the current authentication and session:
+
+```java
+@GetMapping("/security-info")
+public String getSecurityInfo(HttpServletRequest request) {
+
+    HttpSession session = request.getSession(false);
+    SecurityContext context = SecurityContextHolder.getContext();
+    Authentication authentication = context.getAuthentication();
+
+    return "Username: " + authentication.getName()
+            + "\nAuthorities: " + authentication.getAuthorities()
+            + "\nAuthenticated: " + authentication.isAuthenticated()
+            + "\nSession ID: "
+            + (session != null ? session.getId() : "No session");
+}
+```
+
+`request.getSession(false)` returns an existing session or `null`; it does not create one. By contrast, `request.getSession()` returns the current session or creates one if necessary.
+
+**Key lesson:** successful authentication does not automatically mean an HTTP session must exist. HTTP Basic can authenticate each request using credentials in its `Authorization` header. Session creation depends on the configured session policy and whether some part of the application or framework needs a session.
+
+Also distinguish these headers:
+
+- `Authorization: Basic ...` — HTTP Basic credentials.
+- `Authorization: Bearer ...` — a bearer token.
+
+Enabling `.httpBasic(...)` does not automatically process arbitrary Bearer tokens. A bearer-token authentication mechanism must be configured separately.
+
+## 10. Request lifecycle: Postman to controller
+
+This combines the container, Spring Security, authentication, authorization, and MVC stages. It is a learning map, not a literal list of every internal filter in exact execution order.
+
+```mermaid
+flowchart TD
+    A["Postman sends HTTP request"] --> B["Tomcat receives request"]
+    B --> C["Tomcat exposes HttpServletRequest and HttpServletResponse"]
+    C --> D["Servlet filter chain"]
+    D --> E["DelegatingFilterProxy"]
+    E --> F["FilterChainProxy"]
+    F --> G["Select first matching SecurityFilterChain"]
+    G --> H["Security filters execute"]
+    H --> I{"HTTP Basic credentials present?"}
+    I -->|Yes| J["BasicAuthenticationFilter"]
+    J --> K["AuthenticationManager"]
+    K --> L["AuthenticationProvider"]
+    L --> M["UserDetailsService + PasswordEncoder"]
+    M --> N["Authentication result in SecurityContext"]
+    I -->|No| O["Current / anonymous authentication"]
+    N --> P["AuthorizationFilter"]
+    O --> P
+    P --> Q{"Authorization succeeds?"}
+    Q -->|Yes| R["Continue through remaining filters"]
+    Q -->|No, unauthenticated| S["AuthenticationEntryPoint: 401"]
+    Q -->|No, insufficient authority| T["AccessDeniedHandler: 403"]
+    R --> U["DispatcherServlet"]
+    U --> V["Controller"]
+    V --> W["HTTP response to client"]
+```
+
+In the observed chain, `ExceptionTranslationFilter` is positioned before `AuthorizationFilter`, so it can translate relevant exceptions raised downstream by authorization processing. Authentication filters have their own failure handling.
+
+## 11. Postman test matrix
+
+Use these tests to verify the `/students/**` rules. The exact response body depends on your custom handlers and controller implementation.
+
+| Test | Method and path | Credentials | Expected security behavior |
+|---|---|---|---|
+| Read students | `GET /students` | None | `permitAll()` allows it through authorization |
+| Read one student | `GET /students/{id}` | None | `permitAll()` allows it through authorization |
+| Create student | `POST /students` | Valid Basic credentials | Authentication required |
+| Create without credentials | `POST /students` | None | Authentication challenge / 401 |
+| Delete as non-admin | `DELETE /students/{id}` | Authenticated non-admin | Access denied / 403 |
+| Delete as admin | `DELETE /students/{id}` | Authenticated admin | Passes this chain's role rule |
+
+In Postman, select **Authorization → Basic Auth** and supply the credentials configured for your application. A request that passes a security rule can still fail later due to validation, business logic, or a missing record.
+
+## 12. Common points of confusion
+
+### Does `http.build()` instantiate an interface?
+
+No. It returns a concrete object implementing `SecurityFilterChain`. Java allows an implementation object to be stored or returned using an interface type.
+
+### Is `HttpSecurity` the same as `HttpServletRequest`?
+
+No. `HttpSecurity` configures security during startup. `HttpServletRequest` represents an actual incoming HTTP request at runtime.
+
+### Does Spring Security run in another container?
+
+No. It integrates with the Servlet container through `DelegatingFilterProxy`.
+
+### Does HTTP Basic require a session?
+
+No. HTTP Basic credentials can be sent with each request. Authentication and session creation are separate concerns.
+
+### Does `anyRequest().authenticated()` secure every URL in the application?
+
+Not in this chain. It applies only after `/students/**` has matched this chain's `securityMatcher`. Other paths need another matching chain if they also require Spring Security protection.
+
+### Does `ExceptionTranslationFilter` catch every exception from every security filter?
+
+No. It translates relevant downstream authentication and access-denied exceptions. Authentication filters such as `BasicAuthenticationFilter` have their own failure handling.
+
+## 13. Summary
+
+1. `DelegatingFilterProxy` bridges the Servlet container to Spring Security's `FilterChainProxy`.
+2. `FilterChainProxy` selects the first matching `SecurityFilterChain`.
+3. `HttpSecurity` is a startup-time builder; `http.build()` returns an implementation of the `SecurityFilterChain` interface.
+4. `securityMatcher(...)` selects a whole chain; `requestMatchers(...)` selects an authorization rule inside that chain.
+5. `@Order(1)` gives the Student API chain priority over chains with later order values.
+6. `BasicAuthenticationFilter` processes HTTP Basic credentials; `AuthenticationManager` coordinates authentication and `AuthenticationProvider` performs it.
+7. `AuthorizationFilter` evaluates access rules.
+8. `AuthenticationEntryPoint` handles an authentication challenge; `AccessDeniedHandler` handles insufficient permissions.
+9. The HTTP Basic entry point configured inside `.httpBasic(...)` customizes the Basic challenge/failure response.
+10. Authentication does not inherently require creation of an HTTP session.
+
+## 14. Mermaid diagram rendering
+
+The diagrams above use fenced `mermaid` code blocks. GitHub renders Mermaid diagrams in Markdown. In VS Code, open Markdown preview with `Ctrl+Shift+V` or use **Markdown: Open Preview to the Side**. If the preview displays the Mermaid source as plain code, the preview renderer does not support Mermaid; the Markdown source is still correctly formatted. Install/use a Mermaid-compatible Markdown preview extension to render the diagrams locally.
+
+---
+
+**Placement:** Append this content to `docs/features/03-spring-security-architecture/README.md` in the Student Management repository. It is not part of the Hospital Management System documentation.

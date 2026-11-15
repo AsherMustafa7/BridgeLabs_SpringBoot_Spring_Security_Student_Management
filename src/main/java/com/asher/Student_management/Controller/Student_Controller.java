@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.PutMapping;
+// Import the HttpSession
+
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -31,14 +33,15 @@ public class Student_Controller
         this.studentService = studentService;
     }
     @GetMapping("/security-info")
-    public String getSecurityInfo() 
+    public String getSecurityInfo(HttpServletRequest request) 
     {
+        HttpSession session = request.getSession(false);
         SecurityContext context = SecurityContextHolder.getContext();
         Authentication authentication = context.getAuthentication();
 
         return "Username: " + authentication.getName()
                 + "\nAuthorities: " + authentication.getAuthorities()
-                + "\nAuthenticated: " + authentication.isAuthenticated();
+                + "\nAuthenticated: " + authentication.isAuthenticated()+ "\nSession ID: " + (session != null ? session.getId() : "No session");
     }
     @GetMapping("/session-info")
     public String getSessionInfo(HttpServletRequest request) {
