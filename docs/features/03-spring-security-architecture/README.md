@@ -28,6 +28,343 @@
     Logs](#9-initial-postman-experiments-and-observed-logs)
 
 ------------------------------------------------------------------------
+## Overview
+
+The Hospital Management System is a small, practical backend application designed to demonstrate how to build secure REST APIs using Spring Boot.
+
+The backend provides user registration and login, token-based authentication, and CRUD operations for patient records. Spring Data JPA and Hibernate handle persistence, while MySQL stores application data. Spring Security validates JWTs and protects patient endpoints.
+
+### Goals
+
+- Establish a clean Spring Boot project structure.
+- Apply layered backend architecture.
+- Configure MySQL and JPA/Hibernate.
+- Implement entity, repository, and service layers.
+- Build patient CRUD REST endpoints.
+- Implement registration and login.
+- Hash passwords using BCrypt.
+- Generate and validate JWTs.
+- Secure endpoints using Spring Security.
+- Handle errors and validation consistently.
+- Verify functionality through Postman and automated tests.
+- Maintain feature-level documentation and a disciplined Git workflow.
+
+## Project Scope
+
+The supplied requirements intentionally keep this application small.
+
+### Included
+
+- User registration and login.
+- BCrypt password hashing.
+- JWT generation, parsing, and validation.
+- Spring Security authentication and authorization.
+- Patient creation, retrieval, update, and deletion.
+- MySQL persistence.
+- Centralized exception handling and validation support.
+- Postman API testing.
+- Unit and integration testing support.
+
+### Excluded from the current requirements
+
+- Doctor management.
+- Appointment scheduling.
+- Billing and payment management.
+- Frontend or dashboard development.
+- Google login or social authentication.
+- Additional enterprise-level hospital modules.
+
+## Core Modules
+
+### 1. Authentication
+
+The authentication module is responsible for:
+
+- Registering users and checking for duplicate email addresses.
+- Encoding passwords using BCrypt before saving them.
+- Assigning the default `USER` role during public registration.
+- Authenticating login credentials through Spring Security.
+- Generating a signed JWT after successful registration or login.
+- Validating bearer tokens on protected requests.
+
+Public registration does not allow users to choose their own role. `ADMIN` remains a supported role, but administrator privileges must be assigned through a controlled process.
+
+### 2. Patient Management
+
+The patient module provides CRUD operations over patient records.
+
+| Field | Description |
+|---|---|
+| `id` | Generated patient identifier |
+| `name` | Patient name |
+| `age` | Patient age |
+| `gender` | Patient gender |
+| `disease` | Recorded disease or condition |
+| `address` | Patient address |
+| `phoneNumber` | Contact number; mapped to `phone_number` in MySQL |
+
+Operations include creating a patient, retrieving all patients, retrieving one patient by ID, updating a patient, and deleting a patient. These endpoints require a valid JWT.
+
+## Technology Stack
+
+| Technology | Purpose |
+|---|---|
+| Java 25 | Backend programming language |
+| Spring Boot 3.5.16 | Application framework |
+| Spring Web | REST API development |
+| Spring Data JPA | Repository abstraction and persistence |
+| Hibernate | JPA implementation and ORM |
+| MySQL | Relational database |
+| MySQL Connector/J | MySQL JDBC driver |
+| Spring Security | Authentication and authorization |
+| JJWT 0.12.6 | JWT creation, signing, and validation |
+| BCrypt | Password hashing |
+| Jakarta Bean Validation | Request validation |
+| Maven | Dependency and build management |
+| JUnit 5 | Automated tests |
+| Mockito | Mocking in unit tests |
+| Spring Boot Test | Spring application testing |
+| Spring Security Test | Security testing support |
+| H2 | In-memory database intended for isolated tests |
+| Postman | Manual API testing |
+| Git and GitHub | Version control and repository hosting |
+| PowerShell | Development commands and environment loading |
+
+The project uses Spring Boot starters for Web, Data JPA, Security, Validation, and testing. JWT support is provided by `jjwt-api`, `jjwt-impl`, and `jjwt-jackson`.
+
+## Architecture
+
+The backend follows a layered architecture. Each layer has a distinct responsibility.
+
+```mermaid
+flowchart TD
+    A[Client: Postman] --> B[HTTP Request]
+    B --> C[Controller Layer]
+    C --> D[Service Interface]
+    D --> E[Service Implementation]
+    E --> F[Repository Layer]
+    F --> G[Spring Data JPA / Hibernate]
+    G --> H[(MySQL Database)]
+    H --> I[Response Entity]
+    I --> J[Mapper]
+    J --> K[Response DTO]
+    K --> L[HTTP Response]
+```
+
+DTOs and mapper classes translate between API payloads and persistence entities.
+
+| Package / Layer | Responsibility |
+|---|---|
+| `controller` | HTTP endpoints and response handling |
+| `dto.request` | Incoming request models |
+| `dto.response` | API response models |
+| `entity` | JPA-persisted data models |
+| `mapper` | Entity and DTO conversion |
+| `repository` | Database access |
+| `service.interfaces` | Service contracts |
+| `service.implementations` | Business logic |
+| `security` | Spring Security and JWT components |
+| `exception` | Custom exceptions and global exception handling |
+| `validation` | Reusable/custom validation components |
+| `config` | Application/framework configuration |
+
+### Architectural rules
+
+- Controllers handle HTTP concerns; services handle business logic.
+- Repositories handle persistence.
+- DTOs are used instead of exposing JPA entities directly.
+- Mapper classes perform entity/DTO conversion.
+- Dependencies are provided through constructor injection.
+- Service interfaces are separated from implementation classes.
+
+## Request Flows
+
+The following diagrams describe the main request paths implemented by the backend.
+
+### Patient API request
+
+```mermaid
+flowchart TD
+    A[Client: Postman] --> B[HTTP request with Bearer JWT]
+    B --> C[Tomcat Servlet Container]
+    C --> D[Servlet Filter Chain]
+    D --> E[DelegatingFilterProxy]
+    E --> F[Spring Security FilterChainProxy]
+    F --> G[SecurityFilterChain]
+    G --> H[JwtAuthenticationFilter]
+    H --> I{JWT present and valid?}
+    I -->|No token / invalid token| J[Authentication remains absent]
+    I -->|Valid token| K[Load user and create Authentication]
+    K --> L[SecurityContextHolder]
+    J --> M[AuthorizationFilter]
+    L --> M
+    M --> N{Request authorized?}
+    N -->|No| O[AuthenticationEntryPoint: 401]
+    N -->|Yes| P[DispatcherServlet]
+    P --> Q[PatientController]
+    Q --> R[PatientService]
+    R --> S[PatientRepository]
+    S --> T[Hibernate / JPA]
+    T --> U[(MySQL)]
+    U --> V[Response DTO]
+    V --> W[HTTP response]
+    O --> W
+```
+
+An unauthenticated or invalidly authenticated request is rejected by Spring Security before it reaches a protected controller. In this project, Patient endpoints require authentication.
+
+### Registration
+
+```mermaid
+flowchart TD
+    A[Client] --> B[POST /api/auth/register]
+    B --> C[AuthController]
+    C --> D[AuthService]
+    D --> E{Email already exists?}
+    E -->|Yes| F[DuplicateResourceException]
+    E -->|No| G[Map request to User]
+    G --> H[BCrypt password encoding]
+    H --> I[Assign USER role]
+    I --> J[UserRepository]
+    J --> K[(MySQL)]
+    K --> L[JwtService creates signed JWT]
+    L --> M[AuthResponse returned to client]
+    F --> N[GlobalExceptionHandler]
+    N --> O[Error response]
+```
+
+### Login
+
+```mermaid
+flowchart TD
+    A[Client] --> B[POST /api/auth/login]
+    B --> C[AuthController]
+    C --> D[AuthService]
+    D --> E[AuthenticationManager]
+    E --> F[AuthenticationProvider]
+    F --> G[UserDetailsService loads user]
+    G --> H[PasswordEncoder verifies password]
+    H --> I{Credentials valid?}
+    I -->|No| J[AuthenticationException]
+    J --> K[401 Unauthorized response]
+    I -->|Yes| L[Successful authentication]
+    L --> M[JwtService generates JWT]
+    M --> N[AuthResponse returned to client]
+```
+
+### Spring Security filter-chain lifecycle
+
+This more detailed diagram expands the security portion of the Patient API request. It is a conceptual view of the Spring Security request lifecycle, with the JWT authentication filter and stateless configuration used by this project highlighted.
+
+```mermaid
+flowchart TD
+    A["CLIENT: Postman / API consumer"] --> B["HTTP request: /api/patients"]
+    B --> C["Tomcat / Servlet container"]
+    C --> D["Servlet Filter Chain"]
+    D --> E["DelegatingFilterProxy"]
+    E --> F["Spring ApplicationContext"]
+    F --> G["FilterChainProxy"]
+    G --> H["Select matching SecurityFilterChain"]
+    H --> I["Security filters execute in configured order"]
+    I --> J["SecurityContextHolderFilter"]
+    J --> K["SecurityContextRepository"]
+    K --> L["SecurityContextHolder"]
+    L --> M["SecurityContext"]
+    M --> N["JwtAuthenticationFilter"]
+    N --> O{"Bearer token supplied?"}
+    O -->|Yes| P["JwtService validates token"]
+    P --> Q{"Token valid and user exists?"}
+    Q -->|Yes| R["Create authenticated Authentication"]
+    Q -->|No| S["Leave request unauthenticated"]
+    O -->|No| S
+    R --> T["Set Authentication in SecurityContext"]
+    S --> U["Continue security filter chain"]
+    T --> U
+    U --> V["AnonymousAuthenticationFilter if no Authentication exists"]
+    V --> W["AuthorizationFilter"]
+    W --> X{"Authorization rule satisfied?"}
+    X -->|No: unauthenticated| Y["AuthenticationEntryPoint: 401"]
+    X -->|No: authenticated but forbidden| Z["AccessDeniedHandler: 403"]
+    X -->|Yes| AA["DispatcherServlet"]
+    AA --> AB["PatientController"]
+    AB --> AC["PatientService"]
+    AC --> AD["PatientRepository"]
+    AD --> AE["Hibernate / JPA"]
+    AE --> AF[("MySQL Database")]
+    AF --> AG["Response returns through application layers"]
+    AG --> AH["DispatcherServlet creates HTTP response"]
+    AH --> AI["Servlet filters complete response processing"]
+    AI --> AJ["SecurityContextHolderFilter clears thread-bound context"]
+    AJ --> AK["Tomcat sends HTTP response"]
+    AK --> AL["CLIENT receives response: 200 / 201 / 401 / 403 / 500"]
+```
+
+**Important project-specific notes:**
+
+- The application configures a stateless security policy. It does not rely on an HTTP session to retain authentication between requests; the client sends the JWT with each protected request.
+- The `JwtAuthenticationFilter` validates the Bearer token and, when valid, places the resulting `Authentication` in the `SecurityContext`.
+- `AuthorizationFilter` applies the configured authorization rules after authentication processing.
+- An unauthenticated request to a protected endpoint should receive `401 Unauthorized`. An authenticated user who is not permitted to access a resource should receive `403 Forbidden`.
+- `SecurityContextHolderFilter` clears the thread-bound context after request processing.
+- The source material describes one configured security chain. Selection among multiple chains using `@Order` and `securityMatcher` is a general Spring Security capability, not a feature claimed as implemented in this project.
+
+## Project Structure
+
+The following is the intended high-level structure represented in the development material. Some directories are reserved for components introduced in later features.
+
+```text
+Hospital-Management-System/
+|
++-- docs/
+|   +-- features/
+|       +-- 01-project-setup/README.md
+|       +-- 02-entity-layer/README.md
+|       +-- 03-repository-layer/README.md
+|       +-- 04-service-layer/README.md
+|       +-- 05-exception-handling-validation/README.md
+|       +-- 06-patient-crud-apis/README.md
+|       +-- 07-spring-security-jwt/README.md
+|       +-- 08-security-testing/README.md
+|
++-- src/
+|   +-- main/
+|   |   +-- java/com/asher/hospitalmanagement/
+|   |   |   +-- HospitalManagementApplication.java
+|   |   |   +-- config/
+|   |   |   +-- controller/
+|   |   |   |   +-- AuthController.java
+|   |   |   |   +-- PatientController.java
+|   |   |   +-- dto/
+|   |   |   |   +-- request/
+|   |   |   |   +-- response/
+|   |   |   +-- entity/
+|   |   |   |   +-- Patient.java
+|   |   |   |   +-- Role.java
+|   |   |   |   +-- User.java
+|   |   |   +-- exception/
+|   |   |   +-- mapper/
+|   |   |   +-- repository/
+|   |   |   +-- security/
+|   |   |   +-- service/
+|   |   |   |   +-- interfaces/
+|   |   |   |   +-- implementations/
+|   |   |   +-- validation/
+|   |   +-- resources/
+|   |       +-- application.properties
+|   +-- test/
+|       +-- java/com/asher/hospitalmanagement/
+|       +-- resources/application.properties
+|
++-- .env                 # Local secrets; ignored by Git
++-- .env.example         # Example configuration; committed
++-- .gitignore
++-- pom.xml
++-- README.md
+```
+
+The actual checkout should be treated as authoritative if files have since been added, removed, or renamed.
+
+
 
 ## 1. Feature Overview
 
