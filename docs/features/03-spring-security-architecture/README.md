@@ -3810,3 +3810,51 @@ The diagrams above use fenced `mermaid` code blocks. GitHub renders Mermaid diag
 ---
 
 **Placement:** Append this content to `docs/features/03-spring-security-architecture/README.md` in the Student Management repository. It is not part of the Hospital Management System documentation.
+## Complete Spring Security Lifecycle
+
+```mermaid
+flowchart TD
+    subgraph STARTUP["APPLICATION STARTUP"]
+        A["Spring creates beans"]
+        B["HttpSecurity"]
+        C["http.build()"]
+        D["SecurityFilterChain"]
+        E["FilterChainProxy infrastructure"]
+
+        A --> B --> C --> D --> E
+    end
+
+    subgraph REQUEST["INCOMING HTTP REQUEST"]
+        F["Tomcat"]
+        G["HttpServletRequest created<br/>HttpServletResponse created"]
+        H["Tomcat Servlet Filter Chain"]
+        I["DelegatingFilterProxy"]
+        J["FilterChainProxy"]
+        K["Select matching SecurityFilterChain"]
+        L["Security filters execute"]
+
+        F --> G --> H --> I --> J --> K --> L
+
+        L --> M["BasicAuthenticationFilter"]
+        L --> N["AuthorizationFilter"]
+
+        M --> O["AuthenticationManager"]
+        O --> P["AuthenticationProvider"]
+        P --> Q["UserDetailsService<br/>PasswordEncoder"]
+        Q --> R["SecurityContextHolder"]
+
+        N --> S["Authorization rules"]
+
+        R --> T["Continue security processing"]
+        S --> T
+
+        T --> U["ExceptionTranslationFilter"]
+        U --> V["Return to Servlet filter chain"]
+        V --> W["Your custom Servlet filters"]
+        W --> X["DispatcherServlet"]
+        X --> Y["Controller"]
+        Y --> Z["HTTP Response"]
+    end
+
+    E -. "Infrastructure ready" .-> F
+```
