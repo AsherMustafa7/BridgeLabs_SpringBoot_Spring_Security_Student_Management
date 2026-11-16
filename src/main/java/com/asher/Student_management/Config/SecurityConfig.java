@@ -9,14 +9,21 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import com.asher.Student_management.Config.CustomAuthenticationEntryPoint;
 import com.asher.Student_management.Config.CustomAccessDeniedHandler;
 
-
+// ---feature 4 imports here 
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+//-- Feature 4 import ends here
 @Configuration
 @EnableWebSecurity(debug = true)
-public class SecurityConfig {
+public class SecurityConfig 
+{
 
     // @Bean
     // @Order(1)
@@ -26,10 +33,64 @@ public class SecurityConfig {
 
     //     return http.build();
     // }
+    // feature 4 function one being added here for password encoding
+        @Bean
+        public PasswordEncoder passwordEncoder() {
+            return new BCryptPasswordEncoder();
+        }
 
+        @Bean
+        public UserDetailsService userDetailsService(
+                PasswordEncoder passwordEncoder) {
 
+            UserDetails admin = User.builder()
+                    .username("asher")
+                    .password(passwordEncoder.encode("admin123"))
+                    .roles("ADMIN")
+                    .build();
+
+            UserDetails student = User.builder()
+                    .username("richa")
+                    .password(passwordEncoder.encode("student123"))
+                    .roles("USER")
+                    .build();
+
+            UserDetails guest = User.builder()
+                    .username("guest")
+                    .password(passwordEncoder.encode("guest123"))
+                    .roles("USER")
+                    .build();
+
+            return new InMemoryUserDetailsManager(
+                    admin,
+                    student,
+                    guest
+            );
+        }
     @Bean
     @Order(1)
+    public SecurityFilterChain apiSecurityInfoFilterChain(HttpSecurity http) throws Exception {
+
+        http
+            .csrf(csrf -> csrf.disable())
+            .securityMatcher("/students/security-info")
+            .exceptionHandling(exception -> exception
+                .authenticationEntryPoint(new CustomAuthenticationEntryPoint())
+                .accessDeniedHandler(new CustomAccessDeniedHandler())
+                // we can also do this , without actually taking it as parameters but its better as parameters cause the spring already has the bean
+            )
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers(HttpMethod.GET, "/students/**").hasRole("ADMIN")
+            )
+            .httpBasic(Customizer.withDefaults());
+
+        return http.build();
+    }
+
+    // Feature 4 function one being added here for password encoding
+
+    @Bean
+    @Order(2)
     public SecurityFilterChain apiSecurityFilterChain(
             HttpSecurity http,
             CustomAuthenticationEntryPoint authenticationEntryPoint,
@@ -92,8 +153,10 @@ public class SecurityConfig {
 
     //     return http.build();
     // }
+
+
     @Bean
-    @Order(2)
+    @Order(3)
     public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http)
             throws Exception {
 
