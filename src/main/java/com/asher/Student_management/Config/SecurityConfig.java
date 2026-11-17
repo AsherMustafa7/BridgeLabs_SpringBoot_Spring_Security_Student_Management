@@ -15,10 +15,7 @@ import com.asher.Student_management.Config.CustomAccessDeniedHandler;
 // ---feature 4 imports here 
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+
 //-- Feature 4 import ends here
 @Configuration
 @EnableWebSecurity(debug = true)
@@ -39,34 +36,7 @@ public class SecurityConfig
             return new BCryptPasswordEncoder();
         }
 
-        @Bean
-        public UserDetailsService userDetailsService(
-                PasswordEncoder passwordEncoder) {
-
-            UserDetails admin = User.builder()
-                    .username("asher")
-                    .password(passwordEncoder.encode("admin123"))
-                    .roles("ADMIN")
-                    .build();
-
-            UserDetails student = User.builder()
-                    .username("richa")
-                    .password(passwordEncoder.encode("student123"))
-                    .roles("USER")
-                    .build();
-
-            UserDetails guest = User.builder()
-                    .username("guest")
-                    .password(passwordEncoder.encode("guest123"))
-                    .roles("USER")
-                    .build();
-
-            return new InMemoryUserDetailsManager(
-                    admin,
-                    student,
-                    guest
-            );
-        }
+        // removed the inmemory user details manager cause we already configures the uerdetailservice class as a custom one in src\main\java\com\asher\Student_management\Security\CustomUserDetailsService.java
     @Bean
     @Order(1)
     public SecurityFilterChain apiSecurityInfoFilterChain(HttpSecurity http) throws Exception {
