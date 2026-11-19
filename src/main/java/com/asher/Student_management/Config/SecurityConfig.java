@@ -17,11 +17,32 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 //-- Feature 4 import ends here
+
+//imports of feature 04.2 DaoAuthenticationProvider
+import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.core.userdetails.UserDetailsService;
+
+
 @Configuration
 @EnableWebSecurity(debug = true)
 public class SecurityConfig 
 {
 
+    // bean feature 04.2 DaoAuthenticationProvider
+    @Bean
+    public AuthenticationProvider authenticationProvider(
+            UserDetailsService userDetailsService, // = new customeuserdetailsservice (Dependency Injection happing here)
+            PasswordEncoder passwordEncoder) {
+
+        DaoAuthenticationProvider provider =
+                new DaoAuthenticationProvider(userDetailsService);
+
+
+        provider.setPasswordEncoder(passwordEncoder);
+
+        return provider;
+    }
     // @Bean
     // @Order(1)
     // public SecurityFilterChain apisecurityFilterChain(HttpSecurity http) throws Exception {
@@ -39,11 +60,12 @@ public class SecurityConfig
         // removed the inmemory user details manager cause we already configures the uerdetailservice class as a custom one in src\main\java\com\asher\Student_management\Security\CustomUserDetailsService.java
     @Bean
     @Order(1)
-    public SecurityFilterChain apiSecurityInfoFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain apiSecurityInfoFilterChain(HttpSecurity http, AuthenticationProvider authenticationProvider) throws Exception {
 
         http
             .csrf(csrf -> csrf.disable())
             .securityMatcher("/students/security-info")
+            .authenticationProvider(authenticationProvider)
             .exceptionHandling(exception -> exception
                 .authenticationEntryPoint(new CustomAuthenticationEntryPoint())
                 .accessDeniedHandler(new CustomAccessDeniedHandler())
@@ -52,8 +74,9 @@ public class SecurityConfig
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.GET, "/students/**").hasRole("ADMIN")
             )
+            
             .httpBasic(Customizer.withDefaults());
-
+            
         return http.build();
     }
 

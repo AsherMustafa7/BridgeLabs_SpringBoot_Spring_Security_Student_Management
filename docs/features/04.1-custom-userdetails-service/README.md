@@ -32,8 +32,6 @@ feature.
 So once you send these usernames and password from the postman the spring already has the objects of userDetailsService class and as such it can just, retrieve these object by the userDetails service class verify the password using the password encryptor and using the match function, and all this is actually performed by DaoAuthenticationFilter that Will bring together UserDetailsService and PasswordEncryptor
 
 Honestly the rest of the things are the same, it just that now that we have a custom Representation and Function that will Implement the userDetailsService the spring wont generate that password it used to give us in the console to verify. So it already has the objects and a means to verify them.
-
-
 ## 2. Feature 04 versus Feature 04.1
 
   -----------------------------------------------------------------------
