@@ -25,7 +25,7 @@ public class CustomAuthenticationEntryPoint
         response.setContentType("application/json");
 
         response.getWriter().write(
-            "{\"error\":\"Unauthorized\",\"message\":\"Authentication is required, WEll would you look at that mr. authorised it seems like the overload commence methord in the atuhentationentryface caught you redhanded huh, now get me that code you get when starting the spring backend.\"}"
+            "{\"error\":\"Unauthorized\",\"message\":\"Authentication is required, WEll would you look at that mr. UnAuthenticated it seems like the overload commence methord in the CustomAuthenticaionEntry caught you redhanded huh, now get me that code you get when starting the spring backend.\"}"
         );
     }
 }
